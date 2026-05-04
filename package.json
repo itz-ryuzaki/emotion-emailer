@@ -1,0 +1,22 @@
+{
+  "name": "mindbridge-emotion-emailer",
+  "version": "1.0.0",
+  "description": "MindBridge Emotion Detector — 30s facial analysis with email report",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["emotion", "face-api", "wellness", "nodemailer"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^5.2.1",
+    "nodemailer": "^6.9.13"
+  }
+}

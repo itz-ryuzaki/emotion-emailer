@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Emotion Detector — MindBridge</title>
+<script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --bg: #0a0a0f;
+    --surface: #111118;
+    --border: #2a2840;
+    --purple: #a78bfa;
+    --text: #e8e6f0;
+    --muted: #6b6880;
+    --green: #4ade80;
+    --amber: #fbbf24;
+    --red: #f87171;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'DM Sans', sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem 4rem;
+  }
+
+  header { text-align: center; margin-bottom: 2rem; }
+  header h1 {
+    font-family: 'Space Mono', monospace;
+    font-size: clamp(1.4rem, 4vw, 2rem);
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: #fff;
+  }
+  header h1 span { color: var(--purple); }
+  header p { font-size: 0.85rem; color: var(--muted); margin-top: 0.4rem; font-weight: 300; }
+
+  .container {
+    display: flex;
+    gap: 1.5rem;
+    width: 100%;
+    max-width: 960px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  /* ── Video Panel ── */
+  .video-panel { position: relative; flex: 1 1 400px; max-width: 480px; }
+
+  .video-wrapper {
+    position: relative;
+    border-radius: 16px;
+    overflow: hidden;
+    background: #111118;
+    border: 1px solid var(--border);
+    aspect-ratio: 4/3;
+  }
+
+  #video { width:100%; height:100%; object-fit:cover; display:block; transform:scaleX(-1); }
+  #overlay { position:absolute; top:0; left:0; width:100%; height:100%; transform:scaleX(-1); }
+
+  /* Ring */
+  .session-ring { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; pointer-events:none; opacity:0; transition:opacity 0.3s; }
+  .session-ring.visible { opacity:1; }
+  .ring-svg { position:absolute; top:12px; right:12px; width:72px; height:72px; }
+  .ring-bg { fill:none; stroke:rgba(255,255,255,0.1); stroke-width:4; }
+  .ring-progress { fill:none; stroke:var(--green); stroke-width:4; stroke-linecap:round; stroke-dasharray:188.4; stroke-dashoffset:188.4; transform:rotate(-90deg); transform-origin:50% 50%; transition:stroke-dashoffset 0.9s linear, stroke 0.3s; }
+  .ring-label { position:absolute; top:12px; right:12px; width:72px; height:72px; display:flex; align-items:center; justify-content:center; font-family:'Space Mono',monospace; font-size:1rem; font-weight:700; color:#fff; }
+
+  .fps-badge { font-family:'Space Mono',monospace; font-size:0.65rem; color:#3a3850; position:absolute; bottom:8px; left:10px; background:rgba(10,10,15,0.7); padding:2px 6px; border-radius:4px; }
+
+  .status-bar { display:flex; align-items:center; gap:8px; margin-top:0.75rem; font-size:0.78rem; color:var(--muted); font-family:'Space Mono',monospace; }
+  .status-dot { width:8px; height:8px; border-radius:50%; background:#ef4444; transition:background 0.3s; flex-shrink:0; }
+  .status-dot.active    { background:var(--green); box-shadow:0 0 6px #4ade8066; }
+  .status-dot.recording { background:var(--red); animation:pulse 0.7s infinite; }
+  .status-dot.loading   { background:var(--amber); animation:pulse 1s infinite; }
+
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  .session-badge { display:none; align-items:center; gap:6px; background:rgba(248,113,113,0.12); border:1px solid rgba(248,113,113,0.25); border-radius:99px; padding:4px 12px; font-family:'Space Mono',monospace; font-size:0.72rem; color:var(--red); font-weight:700; margin-top:0.5rem; }
+  .session-badge.visible { display:inline-flex; }
+  .session-badge-dot { width:6px; height:6px; border-radius:50%; background:var(--red); animation:pulse 0.7s infinite; }
+
+  .btn-row { display:flex; gap:0.5rem; margin-top:0.75rem; }
+  .btn { flex:1; padding:0.75rem; border:none; border-radius:10px; font-family:'Space Mono',monospace; font-size:0.78rem; font-weight:700; cursor:pointer; letter-spacing:0.04em; transition:background 0.2s, transform 0.1s, opacity 0.2s; }
+  .btn:active { transform:scale(0.98); }
+  .btn:disabled { opacity:0.35; cursor:not-allowed; transform:none !important; }
+  .btn-primary { background:var(--purple); color:#0a0a0f; }
+  .btn-primary:hover:not(:disabled) { background:#c4b5fd; }
+  .btn-danger  { background:var(--red); color:#fff; }
+  .btn-danger:hover:not(:disabled)  { background:#fca5a5; }
+  .btn-session { background:var(--green); color:#0a0a0f; }
+  .btn-session:hover:not(:disabled) { background:#86efac; }
+
+  /* ── Info Panel ── */
+  .info-panel { flex:1 1 300px; max-width:360px; display:flex; flex-direction:column; gap:1rem; }
+
+  .card { background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:1.25rem; }
+  .card h2 { font-family:'Space Mono',monospace; font-size:0.65rem; color:var(--muted); letter-spacing:0.12em; text-transform:uppercase; margin-bottom:1rem; }
+
+  .main-emotion { text-align:center; padding:0.75rem 0; }
+  .emotion-emoji { font-size:3rem; display:block; margin-bottom:0.4rem; filter:saturate(1.4); transition:all 0.3s ease; }
+  .emotion-label { font-size:1.4rem; font-weight:600; color:#fff; text-transform:capitalize; letter-spacing:-0.02em; }
+  .emotion-conf  { font-size:0.75rem; color:var(--purple); font-family:'Space Mono',monospace; margin-top:0.2rem; }
+  .placeholder-text { color:#3a3850; font-size:0.88rem; padding:1rem 0; }
+
+  .bar-row { display:flex; align-items:center; gap:8px; margin-bottom:0.55rem; }
+  .bar-label { font-size:0.7rem; color:#9d9ab0; width:72px; flex-shrink:0; text-transform:capitalize; }
+  .bar-track { flex:1; height:6px; background:#1e1c2e; border-radius:99px; overflow:hidden; }
+  .bar-fill  { height:100%; border-radius:99px; transition:width 0.35s cubic-bezier(0.4,0,0.2,1); width:0%; }
+  .bar-pct   { font-size:0.65rem; font-family:'Space Mono',monospace; color:var(--muted); width:30px; text-align:right; flex-shrink:0; }
+
+  /* Timeline strip */
+  .timeline-strip { display:flex; gap:2px; flex-wrap:wrap; min-height:32px; align-items:center; }
+  .timeline-dot { width:10px; height:10px; border-radius:3px; opacity:0.85; transition:transform 0.15s; flex-shrink:0; cursor:default; }
+  .timeline-dot:hover { transform:scale(1.5); }
+  .no-face-msg { text-align:center; font-size:0.78rem; color:#3a3850; padding:1rem 0; font-family:'Space Mono',monospace; }
+
+  /* ── Report Modal ── */
+  .modal-backdrop {
+    position:fixed; inset:0;
+    background:rgba(0,0,0,0.8);
+    backdrop-filter:blur(8px);
+    z-index:200;
+    display:flex; align-items:center; justify-content:center;
+    padding:1rem;
+    opacity:0; pointer-events:none;
+    transition:opacity 0.3s;
+  }
+  .modal-backdrop.show { opacity:1; pointer-events:auto; }
+
+  .modal {
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:20px;
+    padding:2rem;
+    width:100%; max-width:500px;
+    max-height:90vh; overflow-y:auto;
+    transform:translateY(20px);
+    transition:transform 0.3s;
+  }
+  .modal-backdrop.show .modal { transform:translateY(0); }
+
+  .modal-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; }
+  .modal-title  { font-family:'Space Mono',monospace; font-size:1.1rem; color:#fff; font-weight:700; }
+  .modal-sub    { font-size:0.75rem; color:var(--muted); margin-top:0.2rem; font-weight:300; }
+  .modal-close  { background:var(--border); border:none; border-radius:8px; color:var(--muted); cursor:pointer; font-size:0.85rem; padding:0.4rem 0.75rem; font-family:'Space Mono',monospace; transition:background 0.2s; }
+  .modal-close:hover { background:#3a3850; color:var(--text); }
+
+  .report-hero { text-align:center; padding:1.5rem; background:#0a0a0f; border-radius:12px; margin-bottom:1.5rem; border:1px solid var(--border); }
+  .report-emoji { font-size:4rem; display:block; margin-bottom:0.5rem; }
+  .report-mood  { font-size:1.6rem; font-weight:700; text-transform:capitalize; color:#fff; letter-spacing:-0.02em; }
+  .report-score { font-size:0.78rem; color:var(--purple); font-family:'Space Mono',monospace; margin-top:0.3rem; }
+  .report-det   { font-size:0.7rem; color:var(--muted); font-family:'Space Mono',monospace; margin-top:0.2rem; }
+
+  .report-section-title { font-family:'Space Mono',monospace; font-size:0.65rem; color:var(--muted); letter-spacing:0.12em; text-transform:uppercase; margin-bottom:0.75rem; }
+
+  .report-timeline { display:flex; gap:3px; flex-wrap:wrap; margin-bottom:1.5rem; }
+  .report-dot { width:14px; height:20px; border-radius:4px; flex-shrink:0; cursor:default; position:relative; }
+  .report-dot:hover::after { content:attr(data-tip); position:absolute; bottom:calc(100% + 4px); left:50%; transform:translateX(-50%); background:#1e1c2e; color:var(--text); font-size:0.6rem; padding:2px 6px; border-radius:4px; white-space:nowrap; font-family:'Space Mono',monospace; pointer-events:none; z-index:10; }
+
+  .report-breakdown { margin-bottom:1.5rem; }
+  .report-insight { background:#0a0a0f; border:1px solid var(--border); border-radius:12px; padding:1rem; font-size:0.84rem; color:#c4c0d8; line-height:1.6; margin-bottom:1.5rem; }
+  .report-insight strong { color:var(--purple); }
+
+  /* Email section */
+  .email-section { border-top:1px solid var(--border); padding-top:1.25rem; }
+  .email-section h3 { font-family:'Space Mono',monospace; font-size:0.65rem; color:var(--muted); letter-spacing:0.12em; text-transform:uppercase; margin-bottom:0.75rem; }
+
+  .email-info { background:#0a0a0f; border:1px solid var(--border); border-radius:10px; padding:0.85rem 1rem; font-size:0.8rem; color:#9d9ab0; margin-bottom:0.75rem; line-height:1.6; }
+  .email-info span { color:var(--purple); font-family:'Space Mono',monospace; font-size:0.75rem; }
+
+  .email-status { margin-top:0.75rem; padding:0.6rem 0.75rem; border-radius:8px; font-size:0.78rem; font-family:'Space Mono',monospace; display:none; }
+  .email-status.success { background:rgba(74,222,128,0.1);  color:var(--green);  border:1px solid rgba(74,222,128,0.2);  display:block; }
+  .email-status.error   { background:rgba(248,113,113,0.1); color:var(--red);    border:1px solid rgba(248,113,113,0.2); display:block; }
+  .email-status.loading { background:rgba(167,139,250,0.1); color:var(--purple); border:1px solid rgba(167,139,250,0.2); display:block; }
+
+  /* Loading overlay */
+  .loading-overlay { position:fixed; inset:0; background:var(--bg); display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:100; gap:1rem; }
+  .loading-overlay p { font-family:'Space Mono',monospace; font-size:0.82rem; color:var(--muted); }
+  .spinner { width:36px; height:36px; border:2px solid var(--border); border-top-color:var(--purple); border-radius:50%; animation:spin 0.8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* Legend */
+  .legend { display:flex; flex-wrap:wrap; gap:6px; margin-top:0.5rem; }
+  .legend-item { display:flex; align-items:center; gap:4px; font-size:0.68rem; color:#9d9ab0; }
+  .legend-dot  { width:10px; height:10px; border-radius:3px; flex-shrink:0; }
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div class="loading-overlay" id="loadingOverlay">
+  <div class="spinner"></div>
+  <p id="loadingMsg">loading models...</p>
+</div>
+
+<!-- Report Modal -->
+<div class="modal-backdrop" id="reportModal">
+  <div class="modal">
+    <div class="modal-header">
+      <div>
+        <div class="modal-title">Session Report</div>
+        <div class="modal-sub" id="reportTimestamp">30-second emotion analysis</div>
+      </div>
+      <button class="modal-close" onclick="closeReport()">✕ close</button>
+    </div>
+
+    <div class="report-hero">
+      <span class="report-emoji" id="reportEmoji">😐</span>
+      <div class="report-mood"  id="reportMood">neutral</div>
+      <div class="report-score" id="reportScore">—</div>
+      <div class="report-det"   id="reportDet">—</div>
+    </div>
+
+    <div class="report-section-title">second-by-second timeline</div>
+    <div class="report-timeline" id="reportTimeline"></div>
+    <div class="legend" id="reportLegend"></div>
+    <div style="margin-bottom:1.5rem;"></div>
+
+    <div class="report-section-title">emotion breakdown (30s avg)</div>
+    <div class="report-breakdown" id="reportBreakdown"></div>
+
+    <div class="report-section-title">wellness insight</div>
+    <div class="report-insight" id="reportInsight"></div>
+
+    <!-- Email -->
+    <div class="email-section">
+      <h3>📧 Email Report</h3>
+      <div class="email-info">
+        Sending to: <span id="emailTo">sjtiwari098@gmail.com</span><br>
+        From: <span>swayam.yadav.1229@gmail.com</span><br>
+        <span style="font-size:0.68rem;color:#3a3850;">Configured securely via server .env — no credentials in browser.</span>
+      </div>
+      <button class="btn btn-primary" style="width:100%;" onclick="sendEmailReport()">
+        SEND EMAIL REPORT
+      </button>
+      <div class="email-status" id="emailStatus"></div>
+    </div>
+  </div>
+</div>
+
+<header>
+  <h1>emotion<span>.</span>detect</h1>
+  <p>30-second session · mood tracked per second · full report emailed automatically</p>
+</header>
+
+<div class="container">
+  <!-- Video Panel -->
+  <div class="video-panel">
+    <div class="video-wrapper">
+      <video id="video" autoplay muted playsinline></video>
+      <canvas id="overlay"></canvas>
+      <div class="session-ring" id="sessionRing">
+        <svg class="ring-svg" viewBox="0 0 72 72">
+          <circle class="ring-bg" cx="36" cy="36" r="30"/>
+          <circle class="ring-progress" id="ringProgress" cx="36" cy="36" r="30"/>
+        </svg>
+        <div class="ring-label" id="ringLabel">30</div>
+      </div>
+      <span class="fps-badge" id="fpsBadge">-- fps</span>
+    </div>
+    <div class="status-bar">
+      <div class="status-dot" id="statusDot"></div>
+      <span id="statusText">camera off</span>
+    </div>
+    <div class="session-badge" id="sessionBadge">
+      <span class="session-badge-dot"></span>
+      <span id="sessionBadgeText">recording — 0s / 30s</span>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-primary" id="startBtn">START CAMERA</button>
+      <button class="btn btn-session" id="sessionBtn" disabled>ANALYSE 30s</button>
+    </div>
+  </div>
+
+  <!-- Info Panel -->
+  <div class="info-panel">
+    <div class="card">
+      <h2>live emotion</h2>
+      <div class="main-emotion" id="mainEmotion">
+        <span class="placeholder-text">start camera to begin</span>
+      </div>
+    </div>
+
+    <div class="card" style="flex:1">
+      <h2>all expressions</h2>
+      <div id="barsContainer">
+        <div class="no-face-msg">no face detected</div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>session timeline</h2>
+      <div class="timeline-strip" id="timelineStrip">
+        <div class="no-face-msg" style="padding:0.4rem 0;font-size:0.7rem;">run a 30s session to see timeline</div>
+      </div>
+      <div class="legend" id="timelineLegend" style="margin-top:0.6rem;"></div>
+    </div>
+
+    <!-- Info card -->
+    <div class="card">
+      <h2>📧 email report</h2>
+      <div style="font-size:0.78rem;color:#9d9ab0;line-height:1.7;">
+        After each 30s session, a full HTML report is emailed to<br>
+        <span style="color:var(--purple);font-family:'Space Mono',monospace;font-size:0.72rem;">sjtiwari098@gmail.com</span><br>
+        from<br>
+        <span style="color:var(--purple);font-family:'Space Mono',monospace;font-size:0.72rem;">swayam.yadav.1229@gmail.com</span><br>
+        <span style="color:#3a3850;font-size:0.68rem;">Credentials stored in server .env only.</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ════════════════════════════════════════════
+   CONFIG
+════════════════════════════════════════════ */
+const EMOTIONS  = ['neutral','happy','sad','angry','fearful','disgusted','surprised'];
+const EMOJI     = { neutral:'😐', happy:'😄', sad:'😢', angry:'😠', fearful:'😨', disgusted:'🤢', surprised:'😲' };
+const COLORS    = { neutral:'#9d9ab0', happy:'#fbbf24', sad:'#60a5fa', angry:'#f87171', fearful:'#c084fc', disgusted:'#4ade80', surprised:'#fb923c' };
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.12/model/';
+const SESSION_DURATION = 30;
+
+/* ════════════════════════════════════════════
+   STATE
+════════════════════════════════════════════ */
+let running       = false;
+let detectLoop    = null;
+let sessionActive = false;
+let sessionLog    = [];
+let sessionTimer  = null;
+let sessionSecond = 0;
+let currentExpr   = null;
+let fpsFrames     = 0;
+let lastFps       = performance.now();
+let lastReport    = null;
+
+/* ════════════════════════════════════════════
+   DOM REFS
+════════════════════════════════════════════ */
+const video            = document.getElementById('video');
+const overlay          = document.getElementById('overlay');
+const ctx              = overlay.getContext('2d');
+const startBtn         = document.getElementById('startBtn');
+const sessionBtn       = document.getElementById('sessionBtn');
+const statusDot        = document.getElementById('statusDot');
+const statusText       = document.getElementById('statusText');
+const mainEmotion      = document.getElementById('mainEmotion');
+const barsContainer    = document.getElementById('barsContainer');
+const fpsBadge         = document.getElementById('fpsBadge');
+const loadingOverlay   = document.getElementById('loadingOverlay');
+const loadingMsg       = document.getElementById('loadingMsg');
+const sessionRing      = document.getElementById('sessionRing');
+const ringProgress     = document.getElementById('ringProgress');
+const ringLabel        = document.getElementById('ringLabel');
+const sessionBadge     = document.getElementById('sessionBadge');
+const sessionBadgeText = document.getElementById('sessionBadgeText');
+const timelineStrip    = document.getElementById('timelineStrip');
+const timelineLegend   = document.getElementById('timelineLegend');
+
+/* ════════════════════════════════════════════
+   MODELS
+════════════════════════════════════════════ */
+async function loadModels() {
+  loadingMsg.textContent = 'loading face detector...';
+  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+  loadingMsg.textContent = 'loading expression model...';
+  await faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL);
+  loadingOverlay.style.display = 'none';
+}
+
+/* ════════════════════════════════════════════
+   STATUS
+════════════════════════════════════════════ */
+function setStatus(state, custom) {
+  statusDot.className = 'status-dot ' + state;
+  const labels = { '':'camera off', loading:'starting...', active:'live — detecting', recording:'recording session' };
+  statusText.textContent = custom || labels[state] || state;
+}
+
+/* ════════════════════════════════════════════
+   LIVE UI
+════════════════════════════════════════════ */
+function renderMainEmotion(emotion, confidence) {
+  mainEmotion.innerHTML = `
+    <span class="emotion-emoji">${EMOJI[emotion]}</span>
+    <div class="emotion-label">${emotion}</div>
+    <div class="emotion-conf">${Math.round(confidence*100)}% confidence</div>
+  `;
+}
+
+function renderBars(expressions) {
+  const sorted = Object.entries(expressions).sort((a,b)=>b[1]-a[1]);
+  barsContainer.innerHTML = sorted.map(([em,val])=>`
+    <div class="bar-row">
+      <span class="bar-label">${em}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(val*100)}%;background:${COLORS[em]}"></div></div>
+      <span class="bar-pct">${Math.round(val*100)}%</span>
+    </div>
+  `).join('');
+}
+
+function renderLegend(containerId) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  el.innerHTML = EMOTIONS.map(em=>`
+    <div class="legend-item">
+      <div class="legend-dot" style="background:${COLORS[em]}"></div>
+      <span>${em}</span>
+    </div>
+  `).join('');
+}
+
+/* ════════════════════════════════════════════
+   DETECTION LOOP
+════════════════════════════════════════════ */
+async function detect() {
+  if (!running) return;
+
+  const result = await faceapi
+    .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize:224, scoreThreshold:0.4 }))
+    .withFaceExpressions();
+
+  overlay.width  = video.videoWidth  || video.offsetWidth;
+  overlay.height = video.videoHeight || video.offsetHeight;
+  ctx.clearRect(0, 0, overlay.width, overlay.height);
+
+  if (result) {
+    const {x,y,width,height} = result.detection.box;
+    const sx = overlay.width  / (video.videoWidth  || overlay.width);
+    const sy = overlay.height / (video.videoHeight || overlay.height);
+
+    ctx.strokeStyle = sessionActive ? '#f87171' : '#a78bfa';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x*sx, y*sy, width*sx, height*sy);
+    ctx.fillStyle = sessionActive ? '#f87171' : '#a78bfa';
+    ctx.fillRect(x*sx, y*sy-24, width*sx, 24);
+    ctx.fillStyle = '#0a0a0f';
+    ctx.font = '600 11px DM Sans, sans-serif';
+    ctx.fillText(sessionActive ? `● REC ${sessionSecond}s` : 'face detected', x*sx+6, y*sy-8);
+
+    const dominant = Object.entries(result.expressions).reduce((a,b)=>a[1]>b[1]?a:b);
+    currentExpr = { emotion:dominant[0], confidence:dominant[1], expressions:result.expressions };
+    renderMainEmotion(dominant[0], dominant[1]);
+    renderBars(result.expressions);
+  } else {
+    currentExpr = null;
+    mainEmotion.innerHTML = `<span class="placeholder-text">no face detected</span>`;
+    barsContainer.innerHTML = `<div class="no-face-msg">position your face in the camera</div>`;
+  }
+
+  fpsFrames++;
+  const now = performance.now();
+  if (now - lastFps > 1000) {
+    fpsBadge.textContent = `${fpsFrames} fps`;
+    fpsFrames = 0; lastFps = now;
+  }
+
+  detectLoop = setTimeout(detect, 120);
+}
+
+/* ════════════════════════════════════════════
+   CAMERA
+════════════════════════════════════════════ */
+startBtn.addEventListener('click', async () => {
+  if (running) {
+    if (sessionActive) stopSession(false);
+    running = false;
+    clearTimeout(detectLoop);
+    video.srcObject?.getTracks().forEach(t=>t.stop());
+    video.srcObject = null;
+    setStatus('');
+    startBtn.textContent = 'START CAMERA';
+    sessionBtn.disabled = true;
+    mainEmotion.innerHTML = `<span class="placeholder-text">start camera to begin</span>`;
+    barsContainer.innerHTML = `<div class="no-face-msg">no face detected</div>`;
+    ctx.clearRect(0,0,overlay.width,overlay.height);
+    return;
+  }
+
+  setStatus('loading');
+  startBtn.disabled = true;
+  startBtn.textContent = 'CONNECTING...';
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:640, height:480 }});
+    video.srcObject = stream;
+    await new Promise(res => { video.onloadedmetadata = res; });
+    video.play();
+    running = true;
+    setStatus('active');
+    startBtn.disabled = false;
+    startBtn.textContent = 'STOP CAMERA';
+    sessionBtn.disabled = false;
+    detect();
+  } catch(e) {
+    setStatus('');
+    startBtn.disabled = false;
+    startBtn.textContent = 'START CAMERA';
+    alert('Camera access denied. Please allow camera permissions and try again.');
+  }
+});
+
+/* ════════════════════════════════════════════
+   SESSION
+════════════════════════════════════════════ */
+sessionBtn.addEventListener('click', () => {
+  if (sessionActive) stopSession(false);
+  else startSession();
+});
+
+function startSession() {
+  sessionActive  = true;
+  sessionLog     = [];
+  sessionSecond  = 0;
+  sessionBtn.textContent = 'CANCEL SESSION';
+  sessionBtn.className   = 'btn btn-danger';
+  sessionRing.classList.add('visible');
+  sessionBadge.classList.add('visible');
+  setStatus('recording');
+  updateRing(0);
+
+  sessionTimer = setInterval(() => {
+    sessionSecond++;
+    sessionLog.push(currentExpr ? {
+      second:      sessionSecond,
+      emotion:     currentExpr.emotion,
+      confidence:  currentExpr.confidence,
+      expressions: { ...currentExpr.expressions }
+    } : { second: sessionSecond, emotion: null, confidence: 0, expressions: {} });
+
+    updateTimelineStrip();
+    updateRing(sessionSecond);
+    sessionBadgeText.textContent = `recording — ${sessionSecond}s / ${SESSION_DURATION}s`;
+
+    if (sessionSecond >= SESSION_DURATION) stopSession(true);
+  }, 1000);
+}
+
+function stopSession(completed) {
+  clearInterval(sessionTimer);
+  sessionActive = false;
+  sessionRing.classList.remove('visible');
+  sessionBadge.classList.remove('visible');
+  sessionBtn.textContent = 'ANALYSE 30s';
+  sessionBtn.className   = 'btn btn-session';
+  setStatus('active');
+  if (completed && sessionLog.length > 0) buildAndShowReport();
+}
+
+function updateRing(sec) {
+  const CIRCUMFERENCE = 188.4;
+  const pct = sec / SESSION_DURATION;
+  ringProgress.style.strokeDashoffset = CIRCUMFERENCE - (pct * CIRCUMFERENCE);
+  ringProgress.style.stroke = pct < 0.5 ? '#4ade80' : pct < 0.8 ? '#fbbf24' : '#f87171';
+  ringLabel.textContent = SESSION_DURATION - sec;
+}
+
+function updateTimelineStrip() {
+  timelineStrip.innerHTML = sessionLog.map(entry => {
+    const color = entry.emotion ? COLORS[entry.emotion] : '#2a2840';
+    return `<div class="timeline-dot" style="background:${color}" title="${entry.emotion || 'no face'} @ ${entry.second}s"></div>`;
+  }).join('');
+  renderLegend('timelineLegend');
+}
+
+/* ════════════════════════════════════════════
+   REPORT
+════════════════════════════════════════════ */
+function buildAndShowReport() {
+  const detected = sessionLog.filter(e => e.emotion !== null);
+  if (!detected.length) {
+    alert('No face detected during session. Please try again.');
+    return;
+  }
+
+  const counts   = {};
+  const exprSums = {};
+  EMOTIONS.forEach(e => { counts[e] = 0; exprSums[e] = 0; });
+
+  detected.forEach(entry => {
+    counts[entry.emotion]++;
+    EMOTIONS.forEach(em => { exprSums[em] += (entry.expressions[em] || 0); });
+  });
+
+  const total    = detected.length;
+  const avgExprs = {};
+  EMOTIONS.forEach(e => { avgExprs[e] = exprSums[e] / total; });
+
+  const dominant   = Object.entries(counts).reduce((a,b)=>b[1]>a[1]?b:a);
+  const domEmotion = dominant[0];
+  const domPct     = Math.round((dominant[1]/total)*100);
+  const avgConf    = detected.reduce((s,e)=>s+e.confidence,0) / total;
+
+  lastReport = {
+    dominantEmotion: domEmotion,
+    dominantPct:     domPct,
+    avgConfidence:   avgConf,
+    avgExpressions:  avgExprs,
+    counts,
+    timeline:        sessionLog,
+    total,
+    detectedCount:   detected.length,
+    timestamp:       new Date().toLocaleString()
+  };
+
+  renderReport(lastReport);
+  document.getElementById('reportModal').classList.add('show');
+}
+
+function renderReport(r) {
+  document.getElementById('reportEmoji').textContent = EMOJI[r.dominantEmotion];
+  document.getElementById('reportMood').textContent  = r.dominantEmotion;
+  document.getElementById('reportScore').textContent =
+    `dominant ${r.dominantPct}% of session · avg confidence ${Math.round(r.avgConfidence*100)}%`;
+  document.getElementById('reportDet').textContent =
+    `${r.detectedCount} / ${SESSION_DURATION} seconds — face detected`;
+  document.getElementById('reportTimestamp').textContent = r.timestamp;
+
+  // Timeline
+  document.getElementById('reportTimeline').innerHTML = r.timeline.map(entry => {
+    const color = entry.emotion ? COLORS[entry.emotion] : '#2a2840';
+    const tip   = entry.emotion
+      ? `${entry.second}s — ${entry.emotion} (${Math.round(entry.confidence*100)}%)`
+      : `${entry.second}s — no face`;
+    return `<div class="report-dot" style="background:${color}" data-tip="${tip}" title="${tip}"></div>`;
+  }).join('');
+
+  renderLegend('reportLegend');
+
+  // Breakdown bars
+  const sorted = Object.entries(r.avgExpressions).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('reportBreakdown').innerHTML = sorted.map(([em,val])=>`
+    <div class="bar-row">
+      <span class="bar-label">${em}</span>
+      <div class="bar-track"><div class="bar-fill" style="width:${Math.round(val*100)}%;background:${COLORS[em]}"></div></div>
+      <span class="bar-pct">${Math.round(val*100)}%</span>
+    </div>
+  `).join('');
+
+  // Insight
+  document.getElementById('reportInsight').innerHTML = generateInsight(r);
+
+  // Reset email status
+  const es = document.getElementById('emailStatus');
+  es.className = 'email-status';
+  es.textContent = '';
+}
+
+function generateInsight(r) {
+  const dm = r.dominantEmotion;
+  const map = {
+    happy:     `You were predominantly <strong>happy</strong> during this session — excellent! Positive states support better focus and memory. 🌟`,
+    neutral:   `Mostly <strong>neutral</strong> — calm and composed, ideal for studying and deep work. 📘`,
+    sad:       `Signs of <strong>sadness</strong> detected. A short break, fresh air, or a chat with a friend can help. 💙`,
+    angry:     `<strong>Frustration</strong> was prominent. Try a 5-minute breathing reset before continuing. 🌬️`,
+    fearful:   `<strong>Anxiety</strong> signs present. The 5-4-3-2-1 grounding technique may help — or speak to a counselor. 🤝`,
+    disgusted: `<strong>Discomfort</strong> detected. Journaling or talking to someone you trust can help process it. 📓`,
+    surprised: `High <strong>stimulation</strong> — intense session! Ensure regular breaks to avoid burnout. ⏱️`
+  };
+  return (map[dm] || `Session complete. Dominant: <strong>${dm}</strong>.`) +
+    `<br><br><span style="font-size:0.72rem;color:#6b6880;">Analysed ${r.total} samples across ${r.detectedCount} detected seconds.</span>`;
+}
+
+function closeReport() {
+  document.getElementById('reportModal').classList.remove('show');
+}
+
+/* ════════════════════════════════════════════
+   EMAIL
+════════════════════════════════════════════ */
+async function sendEmailReport() {
+  if (!lastReport) return;
+
+  showEmailStatus('loading', '⏳ Sending report email...');
+
+  try {
+    const resp = await fetch('/api/send-report', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ report: lastReport })
+    });
+    const data = await resp.json();
+
+    if (resp.ok && data.success) {
+      showEmailStatus('success', `✅ Report sent to ${data.sentTo}`);
+    } else {
+      showEmailStatus('error', `❌ ${data.error || 'Failed to send email.'} ${data.details || ''}`);
+    }
+  } catch(e) {
+    showEmailStatus('error', `❌ Network error: ${e.message}`);
+  }
+}
+
+function showEmailStatus(type, msg) {
+  const el = document.getElementById('emailStatus');
+  el.className = 'email-status ' + type;
+  el.textContent = msg;
+}
+
+/* ════════════════════════════════════════════
+   CLOSE MODAL ON BACKDROP
+════════════════════════════════════════════ */
+document.getElementById('reportModal').addEventListener('click', function(e) {
+  if (e.target === this) closeReport();
+});
+
+/* ════════════════════════════════════════════
+   INIT
+════════════════════════════════════════════ */
+loadModels().catch(e => {
+  loadingMsg.textContent = 'model load failed — refresh to retry.';
+  console.error(e);
+});
+</script>
+</body>
+</html>
