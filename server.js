@@ -23,13 +23,13 @@ if (!GMAIL_USER || !GMAIL_PASS || !REPORT_TO) {
 }
 
 // ── Nodemailer transporter ────────────────────────────────────
-const transporter = nodemailer.createTransport({
+const transporter = GMAIL_USER && GMAIL_PASS ? nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: GMAIL_USER,
     pass: GMAIL_PASS
   }
-});
+}) : null;
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -76,17 +76,20 @@ app.post('/api/gemini-flash', async (req, res) => {
 
     console.log('Calling Groq API...');
     const groqRes = await callGroq(userMessage);
-    if (groqRes.ok) {
-      const data = await groqRes.json();
-      const text = data.choices?.[0]?.message?.content || "I'm here to help. Could you tell me more?";
-      return res.json({ candidates: [{ content: { parts: [{ text }] } }] });
+    
+    if (!groqRes.ok) {
+      console.log(`Groq failed with status ${groqRes.status}`);
+      const errorData = await groqRes.json().catch(() => ({ error: 'Unknown error' }));
+      return res.status(groqRes.status || 500).json({
+        error: 'ai_unavailable',
+        message: 'AI service error',
+        details: errorData
+      });
     }
 
-    console.log(`Groq failed with status ${groqRes.status}`);
-    return res.status(groqRes.status || 500).json({
-      error: 'ai_unavailable',
-      message: 'AI service temporarily unavailable. Please try again later.'
-    });
+    const data = await groqRes.json();
+    const text = data.choices?.[0]?.message?.content || "I'm here to help. Could you tell me more?";
+    return res.json({ candidates: [{ content: { parts: [{ text }] } }] });
 
   } catch (err) {
     console.error('FULL ERROR:', err);
@@ -98,7 +101,7 @@ app.post('/api/gemini-flash', async (req, res) => {
 app.post('/api/send-report', async (req, res) => {
   console.log('POST /api/send-report');
 
-  if (!GMAIL_USER || !GMAIL_PASS || !REPORT_TO) {
+  if (!GMAIL_USER || !GMAIL_PASS || !REPORT_TO || !transporter) {
     return res.status(503).json({ error: 'Email not configured on server. Add GMAIL_USER, GMAIL_PASS, REPORT_TO to .env' });
   }
 
