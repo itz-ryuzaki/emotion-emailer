@@ -6,16 +6,15 @@ const nodemailer = require('nodemailer');
 const fetch = globalThis.fetch || ((...args) => import('node-fetch').then(({ default: f }) => f(...args)));
 
 // ── API Key setup ─────────────────────────────────────────────
-const GROQ_API_KEY   = process.env.GROQ_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 // ── Email config ──────────────────────────────────────────────
 const GMAIL_USER  = process.env.GMAIL_USER;
 const GMAIL_PASS  = process.env.GMAIL_PASS;
 const REPORT_TO   = process.env.REPORT_TO;
 
-if (!GROQ_API_KEY && !GEMINI_API_KEY) {
-  console.error("❌ No API key found. Set GROQ_API_KEY or GEMINI_API_KEY in environment variables.");
+if (!GROQ_API_KEY) {
+  console.error("❌ GROQ_API_KEY not found. Set GROQ_API_KEY in environment variables.");
   process.exit(1);
 }
 
@@ -62,27 +61,7 @@ async function callGroq(userMessage) {
   return res;
 }
 
-// ── Gemini API call (fallback) ────────────────────────────────
-async function callGemini(userMessage) {
-  const models = ['gemini-2.0-flash', 'gemini-1.5-flash', 'gemini-1.5-flash-8b'];
-  for (const model of models) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `You are MindBridge AI, a compassionate mental wellness and academic support assistant for college students. Be warm, empathetic, concise, and helpful. If a user seems in crisis, always recommend speaking to a professional counselor.\n\nUser: ${userMessage}`
-          }]
-        }]
-      })
-    });
-    if (res.status !== 429) return { res, model, provider: 'gemini' };
-    console.log(`Gemini ${model} rate limited, trying next...`);
-  }
-  return null;
-}
+
 
 // ── Main AI proxy endpoint ────────────────────────────────────
 app.post('/api/gemini-flash', async (req, res) => {
@@ -95,30 +74,18 @@ app.post('/api/gemini-flash', async (req, res) => {
       return res.status(400).json({ error: 'No message provided', received: req.body });
     }
 
-    if (GROQ_API_KEY) {
-      console.log('Trying Groq...');
-      const groqRes = await callGroq(userMessage);
-      if (groqRes.ok) {
-        const data = await groqRes.json();
-        const text = data.choices?.[0]?.message?.content || "I'm here to help. Could you tell me more?";
-        return res.json({ candidates: [{ content: { parts: [{ text }] } }] });
-      }
-      console.log(`Groq failed with status ${groqRes.status}, falling back to Gemini...`);
+    console.log('Calling Groq API...');
+    const groqRes = await callGroq(userMessage);
+    if (groqRes.ok) {
+      const data = await groqRes.json();
+      const text = data.choices?.[0]?.message?.content || "I'm here to help. Could you tell me more?";
+      return res.json({ candidates: [{ content: { parts: [{ text }] } }] });
     }
 
-    if (GEMINI_API_KEY) {
-      console.log('Trying Gemini...');
-      const result = await callGemini(userMessage);
-      if (result && result.res.ok) {
-        const data = await result.res.json();
-        console.log(`Success with Gemini model: ${result.model}`);
-        return res.json(data);
-      }
-    }
-
-    return res.status(429).json({
-      error: 'rate_limited',
-      message: 'AI is busy right now. Please wait 1 minute and try again.'
+    console.log(`Groq failed with status ${groqRes.status}`);
+    return res.status(groqRes.status || 500).json({
+      error: 'ai_unavailable',
+      message: 'AI service temporarily unavailable. Please try again later.'
     });
 
   } catch (err) {
@@ -283,7 +250,6 @@ app.get('/emotion-detector',(req, res) => res.sendFile(path.join(__dirname, 'emo
 
 app.listen(PORT, () => {
   console.log(`✅ MindBridge running on port ${PORT}`);
-  console.log(`   Groq:   ${GROQ_API_KEY   ? '✅ enabled' : '❌ not set'}`);
-  console.log(`   Gemini: ${GEMINI_API_KEY ? '✅ enabled (fallback)' : '❌ not set'}`);
-  console.log(`   Email:  ${GMAIL_USER     ? `✅ ${GMAIL_USER} → ${REPORT_TO}` : '❌ not configured'}`);
+  console.log(`   Groq:  ${GROQ_API_KEY ? '✅ enabled' : '❌ not set'}`);
+  console.log(`   Email: ${GMAIL_USER     ? `✅ ${GMAIL_USER} → ${REPORT_TO}` : '❌ not configured'}`);
 });
